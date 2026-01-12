@@ -13,4 +13,7 @@ class AgentState(TypedDict):
     alerts: List[str]
     flight_info: str # Added flight info
     local_tips: List[str]
+    packing_list: str
+    events: str
+    map_markers: List[dict] # [{lat: float, lon: float, name: str, description: str}]
     revision_count: int

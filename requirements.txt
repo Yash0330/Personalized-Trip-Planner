@@ -4,3 +4,4 @@ langchain-community
 tavily-python
 python-dotenv
 streamlit
+geopy

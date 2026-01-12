@@ -1,149 +1,173 @@
 import streamlit as st
 import os
+import pandas as pd
 from dotenv import load_dotenv
 
-# Load environment variables before importing the graph to ensure API keys are available
+# Load environment variables
 load_dotenv()
 
-# Warn if keys are missing but allow the UI to load (will fail on execution if missing)
+# Page Config
+st.set_page_config(page_title="Trip Planner | AI Travel Assistant", page_icon="🌍", layout="wide")
+
+# Custom CSS for modern look
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        height: 3em;
+        background-color: #FF4B4B;
+        color: white;
+    }
+    .stTextArea textarea {
+        border-radius: 10px;
+    }
+    .stTextInput input {
+        border-radius: 10px;
+    }
+    .css-1d391kg {
+        padding-top: 1rem;
+    }
+    h1, h2, h3 {
+        color: #1a1a1a;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 if not os.getenv("OPENAI_API_KEY"):
-    st.warning("OPENAI_API_KEY not found in environment variables. Please check your .env file.")
+    st.error("🔑 OPENAI_API_KEY missing. Please check your .env file.")
+    st.stop()
 
 try:
     from app.graph import app as graph_app
 except Exception as e:
-    st.error(f"Failed to import application graph: {e}")
+    st.error(f"Failed to import graph: {e}")
     st.stop()
 
-st.set_page_config(page_title="Multi-Agent Travel Planner", layout="wide")
+# Header
+col_logo, col_title = st.columns([1, 5])
+with col_logo:
+    st.markdown("# 🌍") 
+with col_title:
+    st.title("AI Personal Trip Planner")
+    st.markdown("Your personalized schedule, budget auditor, event scout, and packing assistant.")
 
-st.title("Multi-Agent Travel Planner ✈️")
-st.markdown("---")
+st.divider()
 
-# Sidebar for Agent Outputs
+# Left Sidebar for Inputs
 with st.sidebar:
-    st.header("🕵️ Agent Team")
-    st.markdown("Real-time insights from your travel agents.")
-    
-    st.divider()
-    
-    budget_container = st.container()
-    alert_container = st.container()
-    suggestion_container = st.container()
-    flight_container = st.container()
-
-    # Initial states for sidebar
-    with budget_container:
-        st.subheader("💰 Budget Agent")
-        st.info("Waiting for itinerary...")
-        
-    with alert_container:
-        st.subheader("🌦️ Alert Agent")
-        st.info("Checking weather/safety...")
-        
-    with suggestion_container:
-        st.subheader("💎 Suggestion Agent")
-        st.info("Looking for hidden gems...")
-        
-    with flight_container:
-        st.subheader("✈️ Flight Agent")
-        st.info("Searching for flights...")
-
-# Main Input Area
-st.header("Plan Your Trip")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    origin = st.text_input("Origin", value="New York")
-with col2:
-    destination = st.text_input("Destination", value="London")
-with col3:
+    st.header("✈️ Trip Details")
+    origin = st.text_input("From", value="New York")
+    destination = st.text_input("To", value="London")
     dates = st.text_input("Dates", value="August 10-15, 2024")
+    interests = st.text_area("Preferences & Interests", value="History, Pubs, Museums, Jazz Music", height=100)
+    
+    st.markdown("### 🔧 Settings")
+    budget_level = st.select_slider("Budget Level", options=["Budget", "Moderate", "Luxury"], value="Moderate")
+    
+    generate_btn = st.button("🚀 Generate Trip Plan", type="primary")
 
-interests = st.text_area("Interests (comma separated)", value="History, Pubs, Museums")
-try_concierge = st.button("Plan Trip", type="primary")
+# Main Content Area - Placeholder before generation
+if not generate_btn and "final_state" not in st.session_state:
+    st.info("👈 Enter your trip details in the sidebar and click 'Generate Trip Plan' to start!")
+    
+    # Showcase features
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("### 🗺️ Smart Mapping")
+        st.caption("Auto-plots your itinerary on an interactive map.")
+    with c2:
+        st.markdown("### 🎒 Packing Lists")
+        st.caption("Weather-aware packing checklists generated for you.")
+    with c3:
+        st.markdown("### 🎟️ Live Events")
+        st.caption("Finds real concerts and events happening during your trip.")
 
-if try_concierge:
-    if not destination or not dates or not origin:
-        st.warning("Please provide origin, destination, and dates.")
-    else:
-        with st.spinner("Coordinating agents... (Builder -> Budget/Alert/Suggestions/Flights -> Summary)"):
-            # Prepare initial state
-            initial_state = {
-                "destination": destination,
-                "origin": origin,
-                "dates": dates,
-                "preferences": [i.strip() for i in interests.split(",")],
-                "messages": []
-            }
+
+# State Management for App execution
+if generate_btn:
+    with st.spinner("🤖 Agents working: Builder -> Packing/Events/Map -> Summary..."):
+        initial_state = {
+            "destination": destination,
+            "origin": origin,
+            "dates": dates,
+            "preferences": [i.strip() for i in interests.split(",")],
+             "messages": []
+        }
+        try:
+            final_state = graph_app.invoke(initial_state)
+            st.session_state["final_state"] = final_state
+        except Exception as e:
+            st.error(f"Error running agents: {e}")
+
+# Display Results if state exists
+if "final_state" in st.session_state:
+    state = st.session_state["final_state"]
+    
+    # Organize into Tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["📝 Itinerary & Plan", "🗺️ Map View", "🎟️ Live Events", "🎒 Logistics & Packing"])
+    
+    with tab1:
+        st.subheader(f"Trip to {state.get('destination')}")
+        
+        # Pull final report message or generic itinerary
+        msgs = state.get("messages", [])
+        if msgs and len(msgs) > 0:
+            final_report = msgs[-1].content
+        else:
+            final_report = state.get("itinerary", "No details generated.")
             
-            try:
-                # Invoke the LangGraph workflow
-                final_state = graph_app.invoke(initial_state)
-                
-                # Extract results
-                itinerary = final_state.get("itinerary", "No itinerary generated.")
-                budget_feedback = final_state.get("budget_feedback", "")
-                alerts = final_state.get("alerts", [])
-                alerts = final_state.get("alerts", [])
-                local_tips = final_state.get("local_tips", [])
-                flight_info = final_state.get("flight_info", "")
-                messages = final_state.get("messages", [])
-                
-                # Get the final summary if available (it might be in the last message content or itinerary)
-                # The prompt for summary_node returns a message, but logic puts it in messages list.
-                # However, the user asked to display the "Final Itinerary" in the main column.
-                # The summary_node aggregates everything into a final Markdown report.
-                # Let's check where the summary node output goes. 
-                # In summary_node: return {"messages": [response]}
-                
-                final_report = ""
-                if messages and len(messages) > 0:
-                    final_report = messages[-1].content
-                else:
-                    final_report = itinerary # Fallback if summary failed
+        st.markdown(final_report)
+        
+        # Agent Insights in Expanders
+        with st.expander("💰 Budget Audit"):
+            st.write(state.get("budget_feedback", "No budget concerns."))
+        
+        with st.expander("💎 User Suggestions"):
+            for tip in state.get("local_tips", []):
+                st.write(f"- {tip}")
 
-                # Update Main Column
-                st.success("Trip Planning Complete!")
-                st.markdown("### 🗺️ Final Itinerary & Report")
-                st.markdown(final_report)
-                
-                # Update Sidebar with Agent Specifics
-                with budget_container:
-                    budget_container.empty() # Clear previous
-                    st.subheader("💰 Budget Agent")
-                    if budget_feedback:
-                        st.warning(f"**Audit:** {budget_feedback}")
-                    else:
-                        st.success("Budget looks good!")
+    with tab2:
+        st.subheader("Interactive Map")
+        markers = state.get("map_markers", [])
+        if markers:
+            # Create a DF for st.map
+            map_data = pd.DataFrame(markers)
+            # rename for Streamlit (requires lat/lon or latitude/longitude columns)
+            # Our state has 'lat', 'lon'
+            st.map(map_data, zoom=12, use_container_width=True)
+            
+            # Show legend/details below
+            st.write("### Key Locations:")
+            cols = st.columns(3)
+            for idx, marker in enumerate(markers):
+                with cols[idx % 3]:
+                    st.info(f"**{marker['name']}**")
+        else:
+            st.warning("No map markers could be generated for this location.")
 
-                with alert_container:
-                    alert_container.empty()
-                    st.subheader("🌦️ Alert Agent")
-                    if alerts:
-                        for alert in alerts:
-                            st.error(f"**Alert:** {alert}")
-                    else:
-                        st.success("No alerts found.")
+    with tab3:
+        st.subheader("Live Events & Concerts")
+        st.markdown(state.get("events", "No specific events found."))
 
-                with suggestion_container:
-                    suggestion_container.empty()
-                    st.subheader("💎 Suggestion Agent")
-                    if local_tips:
-                        for tip in local_tips:
-                            st.markdown(f"- {tip}")
-                    else:
-                        st.info("No specific hidden gems found.")
-                        
-                with flight_container:
-                    flight_container.empty()
-                    st.subheader("✈️ Flight Agent")
-                    if flight_info:
-                        st.success("Flights found!")
-                        st.markdown(flight_info)
-                    else:
-                        st.info("No flight info found.")
-                        
-            except Exception as e:
-                st.error(f"Error running agents: {e}")
-                st.info("Check your API Key and connection.")
+    with tab4:
+        col_pack, col_flights = st.columns(2)
+        
+        with col_pack:
+            st.subheader("Smart Packing List")
+            st.markdown(state.get("packing_list", "No packing list generated."))
+            
+        with col_flights:
+            st.subheader("Flight Options")
+            st.markdown(state.get("flight_info", "No flights found."))
+            
+            st.subheader("Safety Alerts")
+            alerts = state.get("alerts", [])
+            if alerts:
+                for a in alerts:
+                    st.error(a)
+            else:
+                st.success("No major alerts for this destination.")

@@ -5,6 +5,9 @@ from app.state import AgentState
 from tavily import TavilyClient
 import os
 
+import json
+from geopy.geocoders import Nominatim
+
 # Initialize LLM
 llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7)
 
@@ -79,16 +82,8 @@ def suggestion_agent(state: AgentState):
     
     response = llm.invoke(messages)
     
-    # Simple parsing to get a list, though we'll just store the text bloc or split lines
-    # The requirement says "add 3... tips to the local_tips list". 
-    # Current State calls for local_tips: List[str]. 
-    # We'll try to split by newlines or just store the whole block if parsing is complex.
-    # Let's try to make it a list.
-    
     content = response.content
-    # Naive splitting on newlines and cleaning
     tips = [line.strip().lstrip("- ").lstrip("* ") for line in content.split('\n') if line.strip()]
-    # Ensure we limit or format correctly? For now, just taking the non-empty lines.
     
     current_tips = state.get("local_tips", []) or []
     current_tips.extend(tips)
@@ -112,7 +107,6 @@ def flight_search_agent(state: AgentState):
         tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
         response = tavily.search(query=query, topic="general", max_results=3)
         
-        # Format results
         results_text = "Flight Options Found:\n"
         for result in response.get("results", []):
             results_text += f"- [{result['title']}]({result['url']})\n  {result['content'][:200]}...\n"
@@ -121,6 +115,99 @@ def flight_search_agent(state: AgentState):
     except Exception as e:
         return {"flight_info": f"Error searching for flights: {str(e)}"}
 
+def packing_agent(state: AgentState):
+    """
+    Generates a packing list based on destination, dates, and itinerary.
+    """
+    system_message = (
+        "You are a smart travel assistant. specific packing list based on the destination weather, "
+        "duration, and specific activities mentioned in the itinerary. "
+        "Group items by category (Clothing, Electronics, Toiletries, Documents)."
+    )
+    
+    user_content = f"Destination: {state['destination']}\nDates: {state['dates']}\nItinerary Summary: {state.get('itinerary', '')[:500]}..."
+    
+    messages = [
+        SystemMessage(content=system_message),
+        HumanMessage(content=user_content)
+    ]
+    
+    response = llm.invoke(messages)
+    return {"packing_list": response.content}
+
+def event_agent(state: AgentState):
+    """
+    Searches for live events happening during the trip.
+    """
+    destination = state.get("destination", "")
+    dates = state.get("dates", "")
+    
+    query = f"events concerts festivals in {destination} {dates}"
+    
+    try:
+        tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        response = tavily.search(query=query, topic="news", max_results=5)
+        
+        events_text = ""
+        for result in response.get("results", []):
+            events_text += f"- **{result['title']}**: {result['content'][:150]}... [Link]({result['url']})\n"
+            
+        if not events_text:
+            events_text = "No specific events found for these dates."
+            
+        return {"events": events_text}
+    except Exception as e:
+        return {"events": f"Error searching for events: {str(e)}"}
+
+def mapping_agent(state: AgentState):
+    """
+    Extracts locations from the itinerary and returns coordinates for the map.
+    Uses LLM to extract city/place names, then geocodes them.
+    """
+    itinerary = state.get("itinerary", "")
+    # 1. Extract potential locations using LLM
+    extraction_prompt = (
+        "Identify 3-5 main specific landmarks, cities, or attractions mentioned in this itinerary. "
+        "Return strictly a JSON list of strings, e.g., [\"Eiffel Tower\", \"Louvre Museum\"]. "
+        "Do not include generic terms like 'Hotel' or 'Airport' unless named."
+    )
+    
+    messages = [
+        SystemMessage(content=extraction_prompt),
+        HumanMessage(content=itinerary)
+    ]
+    
+    try:
+        response = llm.invoke(messages)
+        # Clean up code blocks if checking
+        content = response.content.strip()
+        if content.startswith("```json"):
+            content = content[7:-3]
+        elif content.startswith("```"):
+            content = content[3:-3]
+            
+        locations = json.loads(content)
+    except:
+        locations = [state['destination']] # Fallback
+        
+    # 2. Geocode
+    geolocator = Nominatim(user_agent="trip_planner_agent")
+    markers = []
+    
+    for loc in locations:
+        try:
+            location = geolocator.geocode(loc)
+            if location:
+                markers.append({
+                    "lat": location.latitude,
+                    "lon": location.longitude,
+                    "name": loc,
+                    "description": f"Visit {loc}"
+                })
+        except:
+            continue
+            
+    return {"map_markers": markers}
 
 def summary_node(state: AgentState):
     """
@@ -128,7 +215,8 @@ def summary_node(state: AgentState):
     """
     system_message = (
         "You are a travel concierge. Create a final travel plan in Markdown. "
-        "Include the itinerary, any budget notes, weather alerts, flight options, and local hidden gems."
+        "Include the itinerary, budget notes, weather alerts, flight options, local hidden gems, "
+        "a packing checklist, and a list of cool live events nearby."
     )
     
     content = f"Destination: {state['destination']}\nDates: {state['dates']}\n"
@@ -145,6 +233,12 @@ def summary_node(state: AgentState):
 
     if state.get("flight_info"):
         content += f"Flight Info:\n{state['flight_info']}\n\n"
+        
+    if state.get("packing_list"):
+        content += f"Packing List:\n{state['packing_list']}\n\n"
+
+    if state.get("events"):
+        content += f"Live Events:\n{state['events']}\n\n"
         
     messages = [
         SystemMessage(content=system_message),
