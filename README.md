@@ -131,7 +131,14 @@ OPENAI_API_KEY=sk-...
 TAVILY_API_KEY=tvly-...
 ```
 
-**4. Run the Application**
+**4. Run the Agent**
+
+```bash
+langgraph dev
+```
+This will automatically open up LangSmith Studio.
+
+**5. Run the Application**
 ```bash
 streamlit run gui.py
 ```

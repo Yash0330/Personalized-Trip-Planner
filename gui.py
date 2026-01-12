@@ -13,7 +13,8 @@ st.set_page_config(page_title="Trip Planner | AI Travel Assistant", page_icon="ð
 st.markdown("""
 <style>
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #ffffff;
+        color: #000000;
     }
     .stButton>button {
         width: 100%;
@@ -24,15 +25,22 @@ st.markdown("""
     }
     .stTextArea textarea {
         border-radius: 10px;
+        color: #000000;
+        background-color: #f0f2f6;
     }
     .stTextInput input {
         border-radius: 10px;
+        color: #000000;
+        background-color: #f0f2f6;
     }
     .css-1d391kg {
         padding-top: 1rem;
     }
-    h1, h2, h3 {
-        color: #1a1a1a;
+    h1, h2, h3, h4, h5, h6, p, div, span, li {
+        color: #000000 !important;
+    }
+    .stMarkdown {
+        color: #000000 !important;
     }
 </style>
 """, unsafe_allow_html=True)

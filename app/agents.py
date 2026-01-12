@@ -4,9 +4,19 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from app.state import AgentState
 from tavily import TavilyClient
 import os
+import logging
 
 import json
 from geopy.geocoders import Nominatim
+
+# Setup Logger
+logger = logging.getLogger("agent_logger")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 # Initialize LLM
 llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7)
@@ -16,6 +26,7 @@ def itinerary_builder(state: AgentState):
     Looks at destination, dates, and budget_feedback. 
     Generates a day-by-day itinerary.
     """
+    logger.info(f"📍 STARTED: Itinerary Builder for {state['destination']}")
     system_message = (
         "You are an expert travel planner. Create a detailed day-by-day itinerary based on the user's destination, "
         "dates, and preferences. Consider any budget feedback provided."
@@ -31,6 +42,7 @@ def itinerary_builder(state: AgentState):
     ]
     
     response = llm.invoke(messages)
+    logger.info("✅ COMPLETED: Itinerary Builder")
     return {"itinerary": response.content}
 
 def budget_agent(state: AgentState):
@@ -38,6 +50,7 @@ def budget_agent(state: AgentState):
     Audits the itinerary and checks if it seems expensive.
     If it finds luxury items, it adds a comment to budget_feedback.
     """
+    logger.info("💰 STARTED: Budget Agent")
     system_message = (
         "You are a strict budget auditor. Review the provided itinerary. "
         "If you find luxury items, expensive activities, or potential overspending, "
@@ -50,6 +63,7 @@ def budget_agent(state: AgentState):
     ]
     
     response = llm.invoke(messages)
+    logger.info("✅ COMPLETED: Budget Agent")
     return {"budget_feedback": response.content}
 
 def alert_agent(state: AgentState):
@@ -57,6 +71,7 @@ def alert_agent(state: AgentState):
     Mock a weather check. 
     If the destination is 'London' or 'Seattle', add a 'Rain Alert' to the alerts list.
     """
+    logger.info("🌦️ STARTED: Alert Agent")
     destination = state.get("destination", "").lower()
     alerts = state.get("alerts", []) or []
     
@@ -64,12 +79,14 @@ def alert_agent(state: AgentState):
         if "Rain Alert" not in alerts:
             alerts.append("Rain Alert")
             
+    logger.info(f"✅ COMPLETED: Alert Agent (Found {len(alerts)} alerts)")
     return {"alerts": alerts}
 
 def suggestion_agent(state: AgentState):
     """
     Adds 3 'Hidden Gem' tips to the local_tips list based on the destination.
     """
+    logger.info("💎 STARTED: Suggestion Agent")
     system_message = (
         "You are a local expert. Provide exactly 3 'Hidden Gem' tips for the specified destination. "
         "Return them as a concise list (bullet points), focusing on off-the-beaten-path experiences."
@@ -88,17 +105,20 @@ def suggestion_agent(state: AgentState):
     current_tips = state.get("local_tips", []) or []
     current_tips.extend(tips)
     
+    logger.info("✅ COMPLETED: Suggestion Agent")
     return {"local_tips": current_tips}
 
 def flight_search_agent(state: AgentState):
     """
     Search for flights using Tavily.
     """
+    logger.info("✈️ STARTED: Flight Search Agent")
     origin = state.get("origin", "")
     destination = state.get("destination", "")
     dates = state.get("dates", "")
     
     if not origin:
+        logger.warning("⚠️ Flight Agent: Info missing")
         return {"flight_info": "No origin city provided, cannot search for flights."}
         
     query = f"flights from {origin} to {destination} on {dates}"
@@ -111,14 +131,17 @@ def flight_search_agent(state: AgentState):
         for result in response.get("results", []):
             results_text += f"- [{result['title']}]({result['url']})\n  {result['content'][:200]}...\n"
             
+        logger.info("✅ COMPLETED: Flight Search Agent (Found results)")
         return {"flight_info": results_text}
     except Exception as e:
+        logger.error(f"❌ ERROR: Flight Search Failed: {e}")
         return {"flight_info": f"Error searching for flights: {str(e)}"}
 
 def packing_agent(state: AgentState):
     """
     Generates a packing list based on destination, dates, and itinerary.
     """
+    logger.info("🎒 STARTED: Packing Agent")
     system_message = (
         "You are a smart travel assistant. specific packing list based on the destination weather, "
         "duration, and specific activities mentioned in the itinerary. "
@@ -133,12 +156,14 @@ def packing_agent(state: AgentState):
     ]
     
     response = llm.invoke(messages)
+    logger.info("✅ COMPLETED: Packing Agent")
     return {"packing_list": response.content}
 
 def event_agent(state: AgentState):
     """
     Searches for live events happening during the trip.
     """
+    logger.info("🎟️ STARTED: Event Agent")
     destination = state.get("destination", "")
     dates = state.get("dates", "")
     
@@ -155,8 +180,10 @@ def event_agent(state: AgentState):
         if not events_text:
             events_text = "No specific events found for these dates."
             
+        logger.info("✅ COMPLETED: Event Agent (Found events)")
         return {"events": events_text}
     except Exception as e:
+        logger.error(f"❌ ERROR: Event Search Failed: {e}")
         return {"events": f"Error searching for events: {str(e)}"}
 
 def mapping_agent(state: AgentState):
@@ -164,6 +191,7 @@ def mapping_agent(state: AgentState):
     Extracts locations from the itinerary and returns coordinates for the map.
     Uses LLM to extract city/place names, then geocodes them.
     """
+    logger.info("🗺️ STARTED: Mapping Agent")
     itinerary = state.get("itinerary", "")
     # 1. Extract potential locations using LLM
     extraction_prompt = (
@@ -187,8 +215,10 @@ def mapping_agent(state: AgentState):
             content = content[3:-3]
             
         locations = json.loads(content)
+        logger.info(f"📍 Mapping Agent: Extracted locations {locations}")
     except:
         locations = [state['destination']] # Fallback
+        logger.warning(f"⚠️ Mapping Agent: Fallback to {locations}")
         
     # 2. Geocode
     geolocator = Nominatim(user_agent="trip_planner_agent")
@@ -207,12 +237,14 @@ def mapping_agent(state: AgentState):
         except:
             continue
             
+    logger.info(f"✅ COMPLETED: Mapping Agent (Generated {len(markers)} markers)")
     return {"map_markers": markers}
 
 def summary_node(state: AgentState):
     """
     Aggregates everything into a final Markdown report.
     """
+    logger.info("📝 STARTED: Summary Node")
     system_message = (
         "You are a travel concierge. Create a final travel plan in Markdown. "
         "Include the itinerary, budget notes, weather alerts, flight options, local hidden gems, "
@@ -247,5 +279,6 @@ def summary_node(state: AgentState):
     
     response = llm.invoke(messages)
     
+    logger.info("✅ COMPLETED: Summary Node")
     # Returning as a message in the state for the final output
     return {"messages": [response]}
